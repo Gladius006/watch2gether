@@ -1,0 +1,2 @@
+import { findRoom,payload,requireMember,database,json,failure } from "@/lib/rooms";
+export async function POST(request:Request,{params}:{params:Promise<{id:string}>}){try{await payload(request);const room=await findRoom((await params).id),member=await requireMember(request,room);await database().prepare("UPDATE members SET last_seen = 0 WHERE token_hash = ?").bind(member.token_hash).run();return json({ok:true});}catch(e){return failure(e);}}

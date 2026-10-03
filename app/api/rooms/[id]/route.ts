@@ -1,0 +1,2 @@
+import { findRoom, requireMember, view, json, failure, database } from "@/lib/rooms";
+export async function GET(request:Request,{params}:{params:Promise<{id:string}>}){try{const room=await findRoom((await params).id);const member=await requireMember(request,room);if(Date.now()-member.last_seen>8000)await database().prepare("UPDATE members SET last_seen = ? WHERE token_hash = ?").bind(Date.now(),member.token_hash).run();return json({room:await view(room)});}catch(e){return failure(e);}}
