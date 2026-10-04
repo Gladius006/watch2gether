@@ -1,15 +1,18 @@
 "use client";
 import { useState } from "react";
-import { Play,Pause,Users,Film,Radio,Link2,Volume2,VolumeX,Maximize,HelpCircle,ShieldCheck,Copy,Check,Loader2,LogOut } from "lucide-react";
+import { Play,Pause,Users,Film,Radio,Link2,Volume2,VolumeX,Maximize,HelpCircle,ShieldCheck,Copy,Check,Loader2,LogOut,Captions } from "lucide-react";
 import { Dialog,DialogContent,DialogTitle,DialogDescription } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
+import { SubtitleDialog } from "@/components/subtitle-dialog";
+import { useSubtitles } from "@/hooks/use-subtitles";
 import { useRoom } from "@/hooks/use-room";
 const fmt=(n:number)=>`${Math.floor((n||0)/60)}:${Math.floor((n||0)%60).toString().padStart(2,"0")}`;
 function DriveIcon(){return <svg width="22" height="22" viewBox="0 0 24 22" aria-hidden="true"><path fill="#34a853" d="M8 1h8l-8 14H0z"/><path fill="#fbbc04" d="m16 1 8 14h-8L8 1z"/><path fill="#4285f4" d="M0 15h24l-4 7H4z"/></svg>;}
 export default function Home(){
- const s=useRoom();const {room}=s;
+ const s=useRoom();const {room}=s;const subtitles=useSubtitles(room,s.memberToken,s.video,s.ready);
+ const [captionsOpen,setCaptionsOpen]=useState(false);
  const [help,setHelp]=useState(false),[invite,setInvite]=useState(false),[copied,setCopied]=useState(false);
  async function copy(){try{await navigator.clipboard.writeText(s.roomUrl);setCopied(true);toast.success("Invitation link copied");setTimeout(()=>setCopied(false),2000);}catch{setInvite(true);}}
  function join(){s.setError("");s.setJoinOpen(true);}
@@ -27,7 +30,7 @@ export default function Home(){
  <div className="player-controls"><Slider aria-label="Video position" min={0} max={s.duration||100} step={.1} value={[s.current]} disabled={!room||!s.isHost||!s.ready||!s.connected} onValueChange={v=>{s.scrubbing.current=true;s.setCurrent(v[0]);}} onValueCommit={v=>{s.scrubbing.current=false;if(s.video.current)s.video.current.currentTime=v[0];void s.control(room?.playing||false,v[0]);}}/><div className="control-row"><div>
  <button aria-label={room?.playing?"Pause for everyone":"Play for everyone"} disabled={!room||!s.isHost||!s.ready||!s.connected} onClick={()=>void s.control(!room?.playing)}>{room?.playing?<Pause size={19} fill="currentColor"/>:<Play size={19} fill="currentColor"/>}</button>
  <button aria-label={s.muted?"Unmute":"Mute"} disabled={!room} onClick={()=>s.setMuted(!s.muted)}>{s.muted?<VolumeX size={19}/>:<Volume2 size={19}/>}</button><span className="time">{fmt(s.current)} <span>/ {fmt(s.duration)}</span></span></div>
- <div><span className="sync-label"><Radio size={14}/>{room?(s.isHost?"You control playback":"Following the host"):"Synced playback"}</span><button aria-label="Fullscreen" onClick={()=>void s.player.current?.requestFullscreen().catch(()=>toast.error("Fullscreen isn’t available in this browser."))}><Maximize size={18}/></button></div></div></div></div>
+ <div><span className="sync-label"><Radio size={14}/>{room?(s.isHost?"You control playback":"Following the host"):"Synced playback"}</span>{room&&<button aria-label="Subtitles" title="Add or manage subtitles" onClick={()=>setCaptionsOpen(true)} className={room.subtitle&&subtitles.enabled?"captions-active":""}><Captions size={20}/></button>}<button aria-label="Fullscreen" onClick={()=>void s.player.current?.requestFullscreen().catch(()=>toast.error("Fullscreen isn’t available in this browser."))}><Maximize size={18}/></button></div></div></div></div>
  <div className="below-player"><div className="mini-icon"><Radio size={20}/></div><div><h3>{room?"Stay in the same moment":"No more “3, 2, 1… play.”"}</h3><p>{room?"The host’s play, pause, and seek changes are shared with everyone.":"Play, pause, or skip. Your room stays together automatically."}</p></div><span className="small-label">{room?"HOST CONTROLLED":"ALL IN SYNC"}</span></div></section>
  <aside className="room-panel">{!room?<><div className="panel-heading"><span className="panel-icon"><Users size={22}/></span><h2>Make room for your people.</h2><p>A movie night is just a link away.</p></div>
  <form className="setup-form" onSubmit={e=>{e.preventDefault();void s.createRoom().catch(()=>{});}}>
@@ -40,9 +43,11 @@ export default function Home(){
  <><div className="panel-heading"><span className="panel-icon"><Users size={22}/></span><h2>Your viewing room</h2><p>{room.members.length} {room.members.length===1?"person":"people"} here · {s.connected?"Connected":"Reconnecting"}</p></div>
  <button className="primary full" onClick={()=>void copy()}>{copied?<Check size={18}/>:<Copy size={18}/>} {copied?"Link copied":"Invite your people"}</button><p className="invite-note">Anyone with your invitation link can join.</p>
  <div className="people-list"><h3>IN THE ROOM</h3>{room.members.map((m,i)=><div className="person" key={`${m.name}-${i}`}><span className={`avatar color-${i%3}`}>{m.name.slice(0,1).toUpperCase()}</span><span>{m.name}</span>{m.isHost&&<span className="host-badge">Host</span>}</div>)}</div>
+ <button className="outline full" onClick={()=>setCaptionsOpen(true)}><Captions size={18}/>{room.subtitle?"Manage subtitles":"Add subtitles"}</button>
  <div className="room-note"><ShieldCheck size={18}/><p>The host controls the shared screen. Your volume is always yours.</p></div><button className="quiet full" onClick={()=>setInvite(true)}><Link2 size={16}/>View room link</button></>}</aside></div>
  {!room&&<section className="steps" aria-label="How to watch together">{[["01","Bring your video","Paste a shared Google Drive link."],["02","Bring your people","Send them your room’s invite link."],["03","Press play, together","Settle in. We’ll keep you in sync."]].map(step=><div key={step[0]}><span className="step-number">{step[0]}</span><div><h3>{step[1]}</h3><p>{step[2]}</p></div></div>)}</section>}
  </main><footer><span>Good films. Better company.</span><span>watch2gether · Made for shared moments</span></footer>
+ <SubtitleDialog open={captionsOpen&&!!room} onOpenChange={setCaptionsOpen} room={room} isHost={s.isHost} subtitles={subtitles} save={s.saveSubtitles}/>
  <Dialog open={s.joinOpen} onOpenChange={v=>{s.setJoinOpen(v);s.setError("");}}><DialogContent className="w2g-dialog"><DialogTitle>There’s a seat for you.</DialogTitle><DialogDescription>Enter your name and the invitation link to join the room.</DialogDescription><form className="setup-form" onSubmit={e=>{e.preventDefault();void s.joinRoom();}}><label>Your name<input value={s.name} onChange={e=>s.setName(e.target.value)} required maxLength={32} placeholder="Your name"/></label><label>Room invitation<input value={s.joinLink} onChange={e=>s.setJoinLink(e.target.value)} required placeholder="Paste a room link"/></label>{s.error&&<p className="error" role="alert">{s.error}</p>}<button className="primary full" disabled={s.busy}>{s.busy?<Loader2 className="spin" size={17}/>:<Users size={17}/>} {s.busy?"Joining…":"Join the room"}</button></form></DialogContent></Dialog>
  <Dialog open={invite} onOpenChange={setInvite}><DialogContent className="w2g-dialog"><DialogTitle>Save a seat for your friends.</DialogTitle><DialogDescription>Share this link. Your friends can join without an account.</DialogDescription><input aria-label="Room invitation link" value={s.roomUrl} readOnly onFocus={e=>e.target.select()}/><button className="primary" onClick={()=>void copy()}><Copy size={17}/>Copy invitation</button></DialogContent></Dialog>
  <Dialog open={help} onOpenChange={setHelp}><DialogContent className="w2g-dialog"><DialogTitle>A movie night in three steps.</DialogTitle><DialogDescription>Watch a shared Google Drive video with anyone you invite.</DialogDescription><ol className="help-list"><li>In Google Drive, open your video’s Share settings and select <strong>Anyone with the link</strong>. Make sure viewers can download it.</li><li>Paste its link here, enter your name, and create a room.</li><li>Copy the room invitation and send it to your friends. The host controls play, pause, and seeking.</li></ol><p className="field-note">MP4 with H.264 video and AAC audio works best. Drive quotas or download restrictions may prevent playback. Rooms expire after 24 hours.</p></DialogContent></Dialog><Toaster theme="dark"/></div>;

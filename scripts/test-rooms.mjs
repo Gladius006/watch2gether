@@ -1,12 +1,25 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { readdirSync,readFileSync } from "node:fs";
+import { mkdirSync,readFileSync } from "node:fs";
 import { createHash,randomUUID } from "node:crypto";
 import ts from "typescript";
 
+const subtitleSource=ts.transpileModule(readFileSync("lib/subtitles.ts","utf8"),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {parseSubtitles,validateCues}=await import(`data:text/javascript;base64,${Buffer.from(subtitleSource).toString("base64")}`);
+const cues=parseSubtitles("1\r\n00:00:00,500 --> 00:00:02,500\r\n<b>Hello</b>\r\nSecond line\r\n\r\n2\r\n00:00:03,000 --> 00:00:05,000\r\nWorld", "movie.srt");
+assert.deepEqual(cues,[{start:.5,end:2.5,text:"Hello\nSecond line"},{start:3,end:5,text:"World"}]);
+assert.deepEqual(parseSubtitles("WEBVTT\n\nNOTE test\ncomment\n\ncue-1\n00:00.500 --> 00:02.500 align:start\nHi", "movie.vtt"),[{start:.5,end:2.5,text:"Hi"}]);
+for(const [source,name] of [["garbage","bad.srt"],["WEBVTT","empty.vtt"],["1\n00:00:05,000 --> 00:00:01,000\nText","bad.srt"],["1\n00:70:00,000 --> 00:80:00,000\nText","bad.srt"],["garbage","bad.ass"]])assert.throws(()=>parseSubtitles(source,name));
+assert.throws(()=>validateCues([{start:3,end:4,text:"One"},{start:1,end:2,text:"Two"}]));
+assert.throws(()=>validateCues(Array.from({length:5001},()=>({start:0,end:1,text:"A"}))));
+console.log("SRT/WebVTT parsing, multiline text, formatting cleanup, ordering, and limits passed.");
 // Unit-check the Drive boundary without accessing anyone's real Drive file.
 const source=ts.transpileModule(readFileSync("lib/drive.ts","utf8"),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
-const {parseDriveLink,driveMedia,videoFilename}=await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+const {parseDriveLink,driveMedia,videoFilename,boundedVideoRange,VIDEO_CHUNK_BYTES}=await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+assert.equal(boundedVideoRange(null),`bytes=0-${VIDEO_CHUNK_BYTES-1}`);
+assert.equal(boundedVideoRange("bytes=100-"),`bytes=100-${100+VIDEO_CHUNK_BYTES-1}`);
+assert.equal(boundedVideoRange("bytes=100-200"),"bytes=100-200");
+for(const range of ["bytes=-500","bytes=200-100","bytes=0-1,3-4","bytes=9007199254740992-"])assert.throws(()=>boundedVideoRange(range));
 assert.deepEqual(parseDriveLink("https://drive.google.com/file/d/abcdefghijklmnop/view?resourcekey=test-key"),{id:"abcdefghijklmnop",key:"test-key"});
 for(const bad of ["https://evil.example/file/d/abcdefghijklmnop","http://drive.google.com/file/d/abcdefghijklmnop","https://drive.google.com/drive/folders/abcdefghijklmnop","javascript:alert(1)"])assert.throws(()=>parseDriveLink(bad));
 const realFetch=globalThis.fetch;let calls=[];
@@ -23,9 +36,9 @@ globalThis.fetch=realFetch;
 console.log("Drive link validation, range streaming, confirmation, quota, and redirect checks passed.");
 
 // Exercise actual API routes using fixtures exclusively in the local database.
-const directory=".wrangler/state/v3/d1/miniflare-D1DatabaseObject";
-const filename=readdirSync(directory).find(f=>f.endsWith(".sqlite")&&f!=="metadata.sqlite");assert.ok(filename);
-const db=new DatabaseSync(`${directory}/${filename}`);db.exec("PRAGMA foreign_keys = ON");
+mkdirSync(".watch2gether",{recursive:true});
+const db=new DatabaseSync(".watch2gether/rooms.sqlite");db.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
+db.exec(readFileSync("netlify/database/migrations/0001_watch_rooms.sql","utf8"));
 const id=randomUUID().replaceAll("-",""),host=randomUUID(),member=randomUUID(),now=Date.now();
 const hash=s=>createHash("sha256").update(s).digest("hex");
 db.prepare("INSERT INTO rooms (id,title,host_name,host_hash,drive_id,video_name,playing,position,updated_at,version,expires_at) VALUES (?,?,?,?,?,?,0,0,?,0,?)").run(id,"Integration test room","Test Host",hash(host),"abcdefghijklmnop","Test video.mp4",now,now+600000);
@@ -45,9 +58,25 @@ try{
  const csrf=await request(`/api/rooms/${id}/join`,{method:"POST",headers:{Origin:"https://evil.example"},body:{name:"Guest"}});assert.equal(csrf.status,403);
  const recovered=await request(`/api/rooms/${id}/join`,{method:"POST",body:{name:"Test Host",hostToken:host,memberToken:member}});assert.equal(recovered.data.isHost,true);assert.equal(recovered.data.room.members.length,2);
  const forbiddenStream=await request(`/api/rooms/${id}/stream?member=invalid`);assert.equal(forbiddenStream.status,401);
+ const subtitlesPath=`/api/rooms/${id}/subtitles`, hostHeaders={"X-Host-Token":host};
+ assert.equal((await request(subtitlesPath)).status,401);
+ assert.equal((await request(subtitlesPath,{method:"POST",headers:{"X-Host-Token":join.data.memberToken},body:{action:"add",name:"movie.srt",cues}})).status,403);
+ const added=await request(subtitlesPath,{method:"POST",headers:hostHeaders,body:{action:"add",name:"movie.srt",cues}});assert.equal(added.status,200);const revision=added.data.room.subtitle.revision;
+ assert.deepEqual((await request(subtitlesPath,{headers:guestHeaders})).data.subtitle.cues,cues);
+ const late=await request(`/api/rooms/${id}/join`,{method:"POST",body:{name:"Late viewer"}});assert.equal(late.data.room.subtitle.name,"movie.srt");
+ const lateHeaders={"X-Member-Token":late.data.memberToken};assert.deepEqual((await request(subtitlesPath,{headers:lateHeaders})).data.subtitle.cues,cues);
+ assert.equal((await request(subtitlesPath,{method:"POST",headers:hostHeaders,body:{action:"add",name:"bad.srt",cues:[{start:3,end:1,text:"Bad"}]}})).status,400);
+ assert.equal((await request(subtitlesPath,{headers:guestHeaders})).data.subtitle.revision,revision);
+ assert.equal((await request(subtitlesPath,{method:"POST",headers:hostHeaders,body:{action:"add",name:"big.srt",cues:[{start:0,end:1,text:"x".repeat(620000)}]}})).status,413);
+ const replaced=await request(subtitlesPath,{method:"POST",headers:hostHeaders,body:{action:"add",name:"new.vtt",cues:[{start:1,end:3,text:"Replacement"}]}});assert.ok(replaced.data.room.subtitle.revision>revision);
+ assert.equal((await request(subtitlesPath,{method:"POST",headers:hostHeaders,body:{action:"remove"}})).data.room.subtitle,null);
+ assert.equal((await request(subtitlesPath,{headers:guestHeaders})).data.subtitle,null);
+ const readded=await request(subtitlesPath,{method:"POST",headers:hostHeaders,body:{action:"add",name:"movie.srt",cues}});assert.ok(readded.data.room.subtitle.revision>replaced.data.room.subtitle.revision);
+ await request(`/api/rooms/${id}/leave`,{method:"POST",body:{},headers:lateHeaders});
+ console.log("Shared subtitle API checks passed: host authorization, persistence, late joining, replacement, removal, invalid uploads, size limits, and increasing revisions.");
  await request(`/api/rooms/${id}/leave`,{method:"POST",body:{},headers:guestHeaders});
  const remaining=await request(`/api/rooms/${id}`,{headers:{"X-Member-Token":member}});assert.equal(remaining.data.room.members.length,1);
  db.prepare("UPDATE rooms SET expires_at = 0 WHERE id = ?").run(id);
  const expired=await request(`/api/rooms/${id}/join`,{method:"POST",body:{name:"Guest"}});assert.equal(expired.status,404);
  console.log("Live API checks passed: join, membership, host authorization, play/pause/seek, host recovery, CSRF, leave, expiry.");
-}finally{db.prepare("DELETE FROM members WHERE room_id = ?").run(id);db.prepare("DELETE FROM rooms WHERE id = ?").run(id);db.close();}
+}finally{db.prepare("DELETE FROM subtitles WHERE room_id = ?").run(id);db.prepare("DELETE FROM members WHERE room_id = ?").run(id);db.prepare("DELETE FROM rooms WHERE id = ?").run(id);db.close();}

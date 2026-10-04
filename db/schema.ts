@@ -11,3 +11,9 @@ export const members = sqliteTable("members", {
   tokenHash: text("token_hash").primaryKey(), roomId: text("room_id").notNull().references(()=>rooms.id,{onDelete:"cascade"}),
   name: text("name").notNull(), isHost: integer("is_host").notNull().default(0), lastSeen: integer("last_seen").notNull(),
 }, t=>[index("idx_members_room_seen").on(t.roomId,t.lastSeen)]);
+// Store normalized, structured subtitle cues, rather than the uploaded file.
+export const subtitles = sqliteTable("subtitles", {
+  roomId: text("room_id").primaryKey().references(()=>rooms.id,{onDelete:"cascade"}),
+  name: text("name").notNull(), revision: integer("revision").notNull(),
+  cuesJson: text("cues_json").notNull(),
+});

@@ -1,0 +1,16 @@
+CREATE TABLE IF NOT EXISTS rooms (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, host_name TEXT NOT NULL,
+  host_hash TEXT NOT NULL, drive_id TEXT NOT NULL, resource_key TEXT,
+  video_name TEXT NOT NULL, playing INTEGER NOT NULL DEFAULT 0,
+  position DOUBLE PRECISION NOT NULL DEFAULT 0, updated_at BIGINT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 0, expires_at BIGINT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS members (
+  token_hash TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, is_host INTEGER NOT NULL DEFAULT 0, last_seen BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_members_room_seen ON members(room_id,last_seen);
+CREATE TABLE IF NOT EXISTS subtitles (
+  room_id TEXT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, revision INTEGER NOT NULL, cues_json TEXT NOT NULL
+);

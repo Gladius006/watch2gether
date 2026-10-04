@@ -1,5 +1,5 @@
 {
-  "name": "site-creator-vinext-starter",
+  "name": "watch2gether",
   "version": "0.1.0",
   "private": true,
   "engines": {
@@ -7,15 +7,20 @@
   },
   "scripts": {
     "install:ci": "node scripts/install-ci.mjs",
-    "dev": "node scripts/run-framework.mjs dev",
-    "build": "node scripts/run-framework.mjs build",
-    "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
+    "dev": "next dev --hostname 127.0.0.1 --port 5173 --webpack",
+    "build": "next build --webpack",
+    "start": "next start --hostname 127.0.0.1 --port 5173",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "deploy": "netlify deploy --prod",
+    "test:api": "node scripts/test-rooms.mjs",
+    "test:browser": "node scripts/test-browser.mjs",
+    "test:postgres": "node scripts/test-postgres.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
     "@hookform/resolvers": "^5.7.1",
+    "@netlify/database": "^2.0.1",
     "@shadcn/react": "^0.3.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
@@ -27,6 +32,7 @@
     "lucide-react": "^1.31.0",
     "next": "16.3.4",
     "next-themes": "^0.4.6",
+    "postgres": "^3.4.9",
     "radix-ui": "^1.6.7",
     "react": "19.2.6",
     "react-day-picker": "^10.0.1",
@@ -42,6 +48,7 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
     "@cloudflare/workers-types": "4.20260515.1",
+    "@netlify/database-dev": "^1.0.1",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
@@ -52,6 +59,7 @@
     "eslint": "9.39.4",
     "eslint-config-next": "16.3.4",
     "json-rpc-2.0": "1.7.1",
+    "netlify-cli": "^27.10.2",
     "raw-body": "3.0.2",
     "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",

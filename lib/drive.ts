@@ -1,4 +1,14 @@
 export class AppError extends Error { constructor(message:string, public status=400){super(message);} }
+export const VIDEO_CHUNK_BYTES = 2 * 1024 * 1024;
+export function boundedVideoRange(range: string | null) {
+  if (!range) return `bytes=0-${VIDEO_CHUNK_BYTES - 1}`;
+  const match = range.match(/^bytes=(\d+)-(\d*)$/);
+  const start = Number(match?.[1]), requestedEnd = match?.[2] ? Number(match[2]) : Infinity;
+  if (!match || !Number.isSafeInteger(start) || (requestedEnd !== Infinity && (!Number.isSafeInteger(requestedEnd) || requestedEnd < start)) || start > Number.MAX_SAFE_INTEGER - VIDEO_CHUNK_BYTES) {
+    throw new AppError("Unsupported video byte range.", 416);
+  }
+  return `bytes=${start}-${Math.min(requestedEnd, start + VIDEO_CHUNK_BYTES - 1)}`;
+}
 export function parseDriveLink(input:unknown) {
   if(typeof input!=="string" || input.length>2048) throw new AppError("Paste a Google Drive video sharing link.");
   let url:URL;try{url=new URL(input);}catch{throw new AppError("Paste a valid Google Drive link.");}
