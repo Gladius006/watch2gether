@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { SubtitleDialog } from "@/components/subtitle-dialog";
 import { useSubtitles } from "@/hooks/use-subtitles";
 import { useRoom } from "@/hooks/use-room";
+import { RoomConversation } from "@/components/room-conversation";
 const fmt=(n:number)=>`${Math.floor((n||0)/60)}:${Math.floor((n||0)%60).toString().padStart(2,"0")}`;
 function DriveIcon(){return <svg width="22" height="22" viewBox="0 0 24 22" aria-hidden="true"><path fill="#34a853" d="M8 1h8l-8 14H0z"/><path fill="#fbbc04" d="m16 1 8 14h-8L8 1z"/><path fill="#4285f4" d="M0 15h24l-4 7H4z"/></svg>;}
 export default function Home(){
@@ -44,6 +45,7 @@ export default function Home(){
  <button className="primary full" onClick={()=>void copy()}>{copied?<Check size={18}/>:<Copy size={18}/>} {copied?"Link copied":"Invite your people"}</button><p className="invite-note">Anyone with your invitation link can join.</p>
  <div className="people-list"><h3>IN THE ROOM</h3>{room.members.map((m,i)=><div className="person" key={`${m.name}-${i}`}><span className={`avatar color-${i%3}`}>{m.name.slice(0,1).toUpperCase()}</span><span>{m.name}</span>{m.isHost&&<span className="host-badge">Host</span>}</div>)}</div>
  <button className="outline full" onClick={()=>setCaptionsOpen(true)}><Captions size={18}/>{room.subtitle?"Manage subtitles":"Add subtitles"}</button>
+ <RoomConversation key={room.id} roomId={room.id} memberToken={s.memberToken}/>
  <div className="room-note"><ShieldCheck size={18}/><p>The host controls the shared screen. Your volume is always yours.</p></div><button className="quiet full" onClick={()=>setInvite(true)}><Link2 size={16}/>View room link</button></>}</aside></div>
  {!room&&<section className="steps" aria-label="How to watch together">{[["01","Bring your video","Paste a shared Google Drive link."],["02","Bring your people","Send them your room’s invite link."],["03","Press play, together","Settle in. We’ll keep you in sync."]].map(step=><div key={step[0]}><span className="step-number">{step[0]}</span><div><h3>{step[1]}</h3><p>{step[2]}</p></div></div>)}</section>}
  </main><footer><span>Good films. Better company.</span><span>watch2gether · Made for shared moments</span></footer>

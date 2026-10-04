@@ -37,10 +37,19 @@ try {
   assert.equal((await db.prepare("SELECT title FROM rooms WHERE id = ?").bind("postgres-test").first()).title, "Movie night");
   assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM members WHERE room_id = ?").bind("postgres-test").first()).n, 1);
   assert.equal((await db.prepare("SELECT name FROM members WHERE room_id = ?").bind("postgres-test").all()).results.length, 1);
+  await db.batch([
+    db.prepare("INSERT INTO chat_messages (id,room_id,sender_hash,sender_name,message,created_at) SELECT ?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM chat_messages WHERE room_id = ?) < 5000 AND (SELECT COUNT(*) FROM chat_messages WHERE sender_hash = ? AND created_at > ?) < 3 ON CONFLICT(id) DO NOTHING").bind("message", "postgres-test", "member", "Host", "Hello, crew!", 1800000000000, "postgres-test", "member", 1799999997000),
+    db.prepare("INSERT INTO voice_peers (id,room_id,member_hash,name,muted,expires_at) SELECT ?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM voice_peers WHERE room_id = ?) < ?").bind("peer", "postgres-test", "member", "Host", 0, 1800000045000, "postgres-test", 6),
+    db.prepare("INSERT INTO voice_signals (id,room_id,from_id,to_id,message_json,created_at,expires_at) SELECT ?,?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM voice_signals WHERE from_id = ? AND created_at > ?) < 100").bind("signal", "postgres-test", "peer", "peer", '{"type":"offer","sdp":"v=0"}', 1800000000000, 1800000060000, "peer", 1799999995000),
+  ]);
+  assert.equal((await db.prepare("SELECT message FROM chat_messages WHERE room_id = ?").bind("postgres-test").first()).message, "Hello, crew!");
+  assert.equal((await db.prepare("SELECT expires_at FROM voice_peers WHERE id = ?").bind("peer").first()).expires_at, 1800000045000);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM voice_signals").first()).n, 1);
   await db.prepare("DELETE FROM rooms WHERE id = ?").bind("postgres-test").run();
   assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM subtitles").first()).n, 0);
   assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM members").first()).n, 0);
-  console.log("PostgreSQL checks passed: migrations, actual driver, bound parameters, timestamps, subtitle persistence, atomic rollback, and cascade cleanup.");
+  for (const table of ["chat_messages", "voice_peers", "voice_signals"]) assert.equal((await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first()).n, 0);
+  console.log("PostgreSQL checks passed: migrations, actual driver, bound parameters, timestamps, subtitles, chat, voice signaling, atomic rollback, and cascade cleanup.");
 } finally {
   if (closeDatabase) await closeDatabase();
   await server.stop();

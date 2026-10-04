@@ -14,7 +14,7 @@ async function connect(): Promise<Backend> {
   const url = process.env.NETLIFY_DB_URL || process.env.DATABASE_URL;
   if (url) {
     const sql = postgres(url, {
-      max: 3, idle_timeout: 20, connect_timeout: 15, prepare: false,
+      max: Math.max(1, Math.min(3, Math.floor(Number(process.env.DATABASE_POOL_SIZE) || 3))), idle_timeout: 20, connect_timeout: 15, prepare: false,
       types: { bigint: { to: 20, from: [20], serialize: String, parse: Number } },
     });
     const parameters = (query: string) => { let n = 0; return query.replace(/\?/g, () => `$${++n}`); };
@@ -38,14 +38,17 @@ async function connect(): Promise<Backend> {
     throw new AppError("The room database isn’t connected yet. Please try again shortly.", 503);
   }
   // A durable, local-only database makes previews usable before account sign-in.
-  const [{ DatabaseSync }, { mkdirSync, readFileSync }, { dirname, resolve }] = await Promise.all([
+  const [{ DatabaseSync }, { mkdirSync, readFileSync, readdirSync }, { dirname, resolve }] = await Promise.all([
     import("node:sqlite"), import("node:fs"), import("node:path"),
   ]);
   const path = resolve(process.env.LOCAL_DATABASE_PATH || ".watch2gether/rooms.sqlite");
   mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   db.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
-  db.exec(readFileSync(resolve("netlify/database/migrations/0001_watch_rooms.sql"), "utf8"));
+  const migrations = resolve("netlify/database/migrations");
+  for (const file of readdirSync(migrations).filter(file => file.endsWith(".sql")).sort()) {
+    db.exec(readFileSync(resolve(migrations, file), "utf8"));
+  }
   const run = (query: Query) => {
     const statement = db.prepare(query.text);
     if (/^\s*SELECT\b/i.test(query.text)) return statement.all(...query.values);

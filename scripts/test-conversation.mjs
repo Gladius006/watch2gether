@@ -1,0 +1,55 @@
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {createHash,randomUUID} from 'node:crypto';
+import {readFileSync,readdirSync,mkdirSync} from 'node:fs';
+mkdirSync('.watch2gether',{recursive:true});
+const db=new DatabaseSync('.watch2gether/rooms.sqlite');
+db.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+for(const file of readdirSync('netlify/database/migrations').filter(file=>file.endsWith('.sql')).sort()) db.exec(readFileSync(`netlify/database/migrations/${file}`,'utf8'));
+const hash=value=>createHash('sha256').update(value).digest('hex');
+const id=randomUUID().replaceAll('-',''), other=randomUUID().replaceAll('-',''), tokens=Array.from({length:8},()=>randomUUID()), peers=Array.from({length:8},()=>randomUUID()), now=Date.now();
+for(const room of [id,other]) db.prepare('INSERT INTO rooms (id,title,host_name,host_hash,drive_id,video_name,updated_at,expires_at) VALUES (?,?,?,?,?,?,?,?)').run(room,'Conversation test','Host','hash','abcdefghijklmnop','test.mp4',now,now+600000);
+for(const [i,token] of tokens.entries()) db.prepare('INSERT INTO members (token_hash,room_id,name,is_host,last_seen) VALUES (?,?,?,?,?)').run(hash(token),id,`Person ${i}`,i===0?1:0,now);
+db.prepare('INSERT INTO members (token_hash,room_id,name,is_host,last_seen) VALUES (?,?,?,?,?)').run('other-member',other,'Other',0,now);
+async function request(path,token,body,origin='http://127.0.0.1:5173') {
+ const response=await fetch(`http://127.0.0.1:5173/api/rooms/${id}/${path}`,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',Origin:origin,...(token?{'X-Member-Token':token}:{})},...(body?{body:JSON.stringify(body)}:{})});
+ return {status:response.status,data:await response.json()};
+}
+try {
+ assert.equal((await request('chat')).status,401);
+ assert.equal((await request('voice')).status,401);
+ const message={id:randomUUID(),text:'<img src=x onerror=alert(1)>\nHello, crew!'};
+ assert.equal((await request('chat',tokens[0],message)).status,200);
+ assert.equal((await request('chat',tokens[0],message)).status,200);
+ const history=await request('chat',tokens[1]);assert.equal(history.data.messages.length,1);assert.equal(history.data.messages[0].name,'Person 0');assert.equal(history.data.messages[0].text,message.text);
+ assert.equal((await request('chat',tokens[1],message)).status,409);
+ assert.equal((await request('chat',tokens[0],{id:randomUUID(),text:' '})).status,400);
+ assert.equal((await request('chat',tokens[0],{id:randomUUID(),text:'x'.repeat(1001)})).status,400);
+ assert.equal((await request('chat',tokens[0],{id:randomUUID(),text:'CSRF'},'https://example.com')).status,403);
+ for(let i=0;i<2;i++)assert.equal((await request('chat',tokens[0],{id:randomUUID(),text:'Burst message'})).status,200);
+ assert.equal((await request('chat',tokens[0],{id:randomUUID(),text:'Too fast'})).status,429);
+ assert.equal((await request('voice',tokens[0],{action:'join',peer:peers[0]})).status,200);
+ assert.equal((await request('voice',tokens[1],{action:'join',peer:peers[0]})).status,409);
+ assert.equal((await request('voice',tokens[1],{action:'join',peer:peers[1]})).status,200);
+ assert.equal((await request(`voice?peer=${peers[0]}`,tokens[1])).status,410);
+ assert.equal((await request('voice',tokens[0],{action:'signal',peer:peers[0],to:peers[1],message:{type:'offer',sdp:'v=0\r\n'}})).status,200);
+ const received=await request(`voice?peer=${peers[1]}`,tokens[1]);assert.equal(received.data.signals.length,1);assert.equal(received.data.signals[0].from,peers[0]);
+ assert.equal((await request('voice',tokens[0],{action:'ack',peer:peers[0],ids:[received.data.signals[0].id]})).status,200);
+ assert.equal((await request(`voice?peer=${peers[1]}`,tokens[1])).data.signals.length,1);
+ assert.equal((await request('voice',tokens[1],{action:'ack',peer:peers[1],ids:[received.data.signals[0].id]})).status,200);
+ assert.equal((await request(`voice?peer=${peers[1]}`,tokens[1])).data.signals.length,0);
+ assert.equal((await request('voice',tokens[0],{action:'signal',peer:peers[0],to:peers[1],message:{type:'invalid'}})).status,400);
+ const outsider=randomUUID();db.prepare('INSERT INTO voice_peers (id,room_id,member_hash,name,expires_at) VALUES (?,?,?,?,?)').run(outsider,other,'other-member','Other',now+45000);
+ assert.equal((await request('voice',tokens[0],{action:'signal',peer:peers[0],to:outsider,message:{type:'offer',sdp:'v=0'}})).status,410);
+ assert.equal((await request('voice',tokens[0],{action:'mute',peer:peers[0],muted:true})).status,200);
+ assert.equal((await request('voice',tokens[1])).data.peers.find(peer=>peer.id===peers[0]).muted,true);
+ for(let i=2;i<6;i++)assert.equal((await request('voice',tokens[i],{action:'join',peer:peers[i]})).status,200);
+ assert.equal((await request('voice',tokens[6],{action:'join',peer:peers[6]})).status,409);
+ db.prepare('UPDATE voice_peers SET expires_at=0 WHERE id=?').run(peers[5]);
+ assert.equal((await request('voice',tokens[6],{action:'join',peer:peers[6]})).status,200);
+ assert.equal((await request('voice',tokens[6],{action:'leave',peer:peers[6]})).status,200);
+ assert.equal((await request(`voice?peer=${peers[6]}`,tokens[6])).status,410);
+ assert.equal((await request('leave',tokens[0],{})).status,200);
+ assert.equal((await request('voice',tokens[1])).data.peers.some(peer=>peer.id===peers[0]),false);
+ console.log('Conversation API checks passed: chat persistence, plain text, idempotency, validation, rate limiting, membership, CSRF, private signaling, acknowledgements, mute, six-person capacity, expired peers, and room-leave cleanup.');
+} finally {for(const room of [id,other])db.prepare('DELETE FROM rooms WHERE id=?').run(room);db.close();}
